@@ -1,0 +1,38 @@
+<launch>
+  <arg name="gui" value="false"/>
+
+  <!-- Load the Gazebo simulator -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find mrs-research)/worlds/TD3.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <!-- Spawn three Turtlebot3 Burger models -->
+  <group ns="robot1">
+    <include file="$(find mrs-research)/launch/burger.gazebo.launch">
+      <arg name="robot_name" value="burger1" />
+      <arg name="robot_position" value="-x 0.0 -y 0.0 -z 0.01 -R 0 -P 0 -Y +0.0" />
+    </include>
+  </group>
+
+  <group ns="robot2">
+    <include file="$(find mrs-research)/launch/burger.gazebo.launch">
+      <arg name="robot_name" value="burger2" />
+      <arg name="robot_position" value="-x 1.0 -y 1.0 -z 0.01 -R 0 -P 0 -Y +0.0" />
+    </include>
+  </group>
+
+  <group ns="robot3">
+    <include file="$(find mrs-research)/launch/burger.gazebo.launch">
+      <arg name="robot_name" value="burger3" />
+      <arg name="robot_position" value="-x 2.0 -y 2.0 -z 0.01 -R 0 -P 0 -Y +0.0" />
+    </include>
+  </group>
+
+  <!-- RVIZ -->
+  <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find mrs-research)/launch/pioneer3dx.rviz" /> -->
+</launch>

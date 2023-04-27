@@ -1,0 +1,24 @@
+<launch>
+
+  <!-- Start Gazebo -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find mrs-research)/worlds/TD3.world"/>
+  </include>
+
+  <!-- Load TurtleBot3 model -->
+  <arg name="model" default="burger"/>
+  <param name="robot_description"
+    command="$(find xacro)/xacro --inorder '$(find turtlebot3_description)/urdf/turtlebot3_burger_for_autorace.urdf.xacro'"/>
+
+  <!-- Spawn multiple instances of TurtleBot3 -->
+  <group ns="robots">
+    <arg name="x" default="0"/>
+    <arg name="y" default="0"/>
+    <arg name="z" default="0"/>
+    <arg name="yaw" default="0"/>
+    <node name="spawn_urdf_1" pkg="gazebo_ros" type="spawn_model" args="-urdf -param robot_description -model robot_0 -x $(arg x) -y $(arg y) -z $(arg z) -Y $(arg yaw)"/>
+    <node name="spawn_urdf_2" pkg="gazebo_ros" type="spawn_model" args="-urdf -param robot_description -model robot_1 -x $(arg x) -y $(arg y) -z $(arg z) -Y $(arg yaw)"/>
+    <node name="spawn_urdf_3" pkg="gazebo_ros" type="spawn_model" args="-urdf -param robot_description -model robot_2 -x $(arg x) -y $(arg y) -z $(arg z) -Y $(arg yaw)"/>
+  </group>
+
+</launch>
