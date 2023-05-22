@@ -4,7 +4,11 @@ import subprocess
 import os
 import time
 import math
+import csv
+from datetime import timedelta
+import datetime
 
+from geometry_msgs.msg import PoseStamped
 from gazebo_msgs.srv import SetModelState
 from gazebo_msgs.msg import ModelState
 from sensor_msgs.msg import LaserScan
@@ -110,10 +114,12 @@ class MultiRobotEnv:
         self.laser_subs = []
         self.odom_subs = []
         self.cmd_vel_pubs = []
+        self.robot_poses = {}
         for i in range(self.num_robots):
             laser_sub = rospy.Subscriber("/robot_{}/scan".format(i), LaserScan, self.laser_callback, i)
             odom_sub = rospy.Subscriber("/robot_{}/odom".format(i), Odometry, self.odom_callback, i)
             cmd_vel_pub = rospy.Publisher("/robot_{}/cmd_vel".format(i), Twist, queue_size=10)
+            # rospy.Subscriber(f'/robot_{i}/pose', PoseStamped, self.pose_callback, i)
             self.laser_subs.append(laser_sub)
             self.odom_subs.append(odom_sub)
             self.cmd_vel_pubs.append(cmd_vel_pub)
@@ -122,11 +128,19 @@ class MultiRobotEnv:
         """Callback method for processing laser scan data for a specific robot."""
         self.robot_laser_data[robot_index] = msg.ranges
 
+    # def pose_callback(self, data, robot_id):
+    #     # Update the robot pose in the dictionary
+    #     self.robot_poses[robot_id] = data.pose
+    #     print(f"Updated pose for robot {robot_id}: {data.pose}")  # Add print statement for debugging
+
+
     def odom_callback(self, msg, robot_index):
         """Callback method for processing odometry data for a specific robot."""
         self.robot_positions[robot_index][0] = msg.pose.pose.position.x
         self.robot_positions[robot_index][1] = msg.pose.pose.position.y
         # self.robot_positions[robot_index][2] = msg.pose.pose.position.z
+        x,y = msg.pose.pose.position.x, msg.pose.pose.position.y
+        self.robot_poses[robot_index] = x,y
 
         # Extract the orientation quaternion from the message
         orientation_q = msg.pose.pose.orientation
@@ -141,7 +155,6 @@ class MultiRobotEnv:
     def step(self, actions):
         # Ensure that the correct number of actions have been provided.
         assert len(actions) == self.num_robots
-        # print(self.observations[1][1])
 
         # Publish actions for each robot
         for i in range(self.num_robots):
@@ -247,7 +260,7 @@ class MultiRobotEnv:
             if i == robot_index:
                 continue
             # If the distance between the two robots is less than a threshold, penalize
-            if np.linalg.norm(self.robot_positions[robot_index] - self.robot_positions[i]) < 0.2:
+            if np.linalg.norm(self.robot_positions[robot_index] - self.robot_positions[i]) < 0.1:
                 reward -= 5
             
         # Check for collisions between the specified robot and obstacles
@@ -467,4 +480,106 @@ class MultiRobotEnv:
 
         return np.array(robot_positions)
 
+
+    # Creating Data for Performace anlysis
+    def robot_name(self):
+        robot_names = {}
+        for robot_index in range(self.num_robots):
+            robot_names[robot_index] = f"robot_{robot_index}"
+        
+        return robot_names
+        
+    def get_robot_loc(self):
+        """
+        Returns the current positions of the robots.
+
+        Returns:
+            A dictionary, where the keys are the robot names and the values are the x and y coordinates of the robots.
+        """
+
+        robot_locations = {}
+        for robot_index in range(self.num_robots):
+            x, y = self.robot_positions[robot_index]
+            robot_locations[f"robot_{robot_index}"] = (x, y)
+        return robot_locations
+
     
+    def reached_goal(self):
+        robot_reached_goal = {}
+        for robot_index in range(self.num_robots):
+            nearest_goal_idx = np.argmin([np.linalg.norm(goal - self.robot_positions[robot_index]) for goal in self.goals])
+            nearest_goal = self.goals[nearest_goal_idx]
+            if np.linalg.norm(self.robot_positions[robot_index] - nearest_goal) < 0.2:
+                robot_reached_goal[robot_index] = f"goal_{nearest_goal_idx}"
+
+        return robot_reached_goal
+    
+    # def get_time(self):
+    #     # Get the current ROS time
+
+    #     ros_time = rospy.get_time()
+    #     formatted_time = timedelta(seconds=ros_time)
+    #     return str(formatted_time)
+
+
+
+    def get_time(self):
+
+        # Get the current ROS time
+        ros_time = rospy.get_time()
+
+        # Convert the ROS time to a datetime object
+        datetime_object = datetime.datetime.fromtimestamp(ros_time)
+
+        # Format the datetime object
+        formatted_time = datetime_object.strftime('%m/%d/%Y %H:%M:%S')
+
+        # Return the formatted datetime object
+        return formatted_time
+
+    
+    def collision(self, rewards):
+        collisions = {robot_index: 0 for robot_index in range(self.num_robots)}
+
+        # If the reward is less than -10, there is a collision
+        for robot_index in range(self.num_robots):
+            if rewards[robot_index] <= -10:
+                collisions[robot_index] += 1
+
+        return collisions
+
+    
+    def performance_data(self, step, episode, rewards):
+
+        # Get the data from the other methods
+        robot_names = self.robot_name()
+        robot_locations = self.get_robot_loc()
+        goals_reached = self.reached_goal()
+        current_time = self.get_time()
+        collisions = self.collision(rewards)
+
+        # Add headers to the CSV file if it doesn't exist
+        file_name = f'data_generated.csv'
+        if not os.path.exists(file_name):
+            with open(file_name, 'w', newline='') as csvfile:
+                csv_writer = csv.writer(csvfile)
+                headers = ['Episode', 'Step', 'Time', 'Robot', 'Reward', 'Goal Reached', 'Location', 'Collision']
+                csv_writer.writerow(headers)
+
+        # Open the CSV file in append mode
+        with open(file_name, 'a', newline='') as csvfile:
+            csv_writer = csv.writer(csvfile)
+
+            # Iterate through all robots and write their data to the CSV file
+            for robot_index in range(self.num_robots):
+                row = [
+                    episode,
+                    step,
+                    current_time,
+                    robot_names[robot_index],
+                    rewards[robot_index],
+                    goals_reached.get(robot_index, "None"),
+                    robot_locations.get(robot_index),
+                    collisions.get(robot_index, 0)
+                ]
+                csv_writer.writerow(row)

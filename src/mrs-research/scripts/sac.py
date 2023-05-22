@@ -8,6 +8,7 @@ from collections import deque
 import random
 import time
 import os
+import csv
 
 from project import MultiRobotEnv
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,6 +30,33 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self.buffer)
+
+def evaluate(network, eval_episodes=10, epoch=0):
+    avg_reward = 0.
+    col = 0
+    for i in range(eval_episodes):
+        count = 0
+        obs = env.reset()
+        done = False
+
+        while not done and count < 501:
+            actions = []
+            for i in range(len(obs)):
+                action = agent.select_action(obs[i])
+                actions.append(action)
+            actions = np.array(actions)
+            obs, reward, done, _ = env.step(actions)
+            total_reward = sum(reward)
+            avg_reward += total_reward
+            count += 1
+            if total_reward < -10:
+                col += 1
+    avg_reward /= eval_episodes
+    avg_col = col/eval_episodes
+    print("..............................................")
+    print("Average Reward over %i Evaluation Episodes, Epoch %i: %f, %f" % (eval_episodes, epoch, avg_reward, avg_col))
+    print("..............................................")
+    return avg_reward
 
 class Actor(nn.Module):
     def __init__(self, obs_dim, act_dim, hidden_dim):
@@ -112,7 +140,7 @@ class Actor(nn.Module):
 
         mean = self.mean_fc(out)
         log_std = self.log_std_fc(out)
-        log_std = torch.clamp(log_std, min=-20, max=2)  # Constrain the logarithm of the standard deviation to a reasonable range
+        log_std = torch.clamp(log_std, min=-20, max=2)  
         return mean, log_std
 
     def sample(self, obs):
@@ -315,7 +343,7 @@ class SACAgent:
         self.actor.load_state_dict(torch.load('%s/%s_actor.pth' % (directory, filename)))
         self.q1.load_state_dict(torch.load('%s/%s_critic1.pth' % (directory, filename)))
         self.q2.load_state_dict(torch.load('%s/%s_critic2.pth' % (directory, filename)))
-
+    
 
 # Define SACAgent class and its methods here (same as before)
 
@@ -334,6 +362,16 @@ if __name__ == "__main__":
     updates_per_step = 1
     start_steps = 20000
     actor_update_frequency = 6
+
+    # EXTRA HYPER-PARAMETERS
+    best_avg_reward = -np.inf
+    termination_threshold = 0.01  # Terminate training when the improvement is below this threshold
+    no_improvement_count = 0
+    max_no_improvement = 5  # Maximum number of evaluations without improvement before stopping training
+    eval_frequency = 500 # Every 1000 steps there is evaluation. 
+
+    episode = 0 # This Tracks Episodes of 300 seconds
+
 
     # Create the environment
     env = MultiRobotEnv('main.launch',3,5)
@@ -378,19 +416,37 @@ if __name__ == "__main__":
             for i in range(updates_per_step):
                 batch = replay_buffer.sample()
                 agent.update(batch)
-                
+
         # Store the episode rewards
         for r in rewards:
             episode_rewards.append(r)
+
+        # Save perfomance Data 
+        env.performance_data(t, episode, rewards)
             
         # If the episode is over, reset the environment
         if all(dones):
             obs = env.reset()
+            episode += 1
 
         print(rewards)
         print(f"{t}: {actions}")
 
-        # Print the current episode reward and save the model weights
-        if t % 1000 == 0:
-            print("Episode: " , t , " reward: ", np.mean(episode_rewards[-1000:]))
-            agent.save('sac', 'files')
+        # Evaluate the agent periodically and update the best network
+        if t % eval_frequency == 0 and t > 0:
+            epoch = t // eval_frequency
+            eval_episodes = 10
+            avg_reward = evaluate(agent, eval_episodes, epoch)
+
+            # Update the best network and save it
+            if avg_reward > best_avg_reward:
+                best_avg_reward = avg_reward
+                agent.save('sac', 'files')
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+
+            # Terminate training if the improvement is below the threshold for several evaluations
+            if no_improvement_count >= max_no_improvement:
+                print("Terminating training: No significant improvement in the last {} evaluations.".format(max_no_improvement))
+                break
